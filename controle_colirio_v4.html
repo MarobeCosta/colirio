@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle de Colírio v4</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 1rem; background: #f5f5f5; color: #1a1a1a; }
+  body.alarming { animation: flash 1s infinite; }
+  @keyframes flash { 0%,100% { background: #f5f5f5; } 50% { background: #ffe0b2; } }
+  h1 { font-size: 20px; font-weight: 500; margin: 0 0 1rem; }
+  .card { background: white; border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+  .alarm-bar { background: #d32f2f; color: white; padding: 1rem; border-radius: 12px; margin-bottom: 1rem; display: none; text-align: center; }
+  .alarm-bar.active { display: block; animation: shake 0.5s infinite; }
+  @keyframes shake { 0%,100% { transform: translateX(0); } 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+  .alarm-bar h2 { margin: 0 0 8px; font-size: 24px; }
+  .alarm-bar button { background: white; color: #d32f2f; border: none; padding: 12px 24px; font-size: 16px; font-weight: 600; border-radius: 8px; cursor: pointer; margin: 4px; }
+  .miss-bar { background: #ff9800; color: white; padding: 12px; border-radius: 12px; margin-bottom: 1rem; display: none; }
+  .miss-bar.active { display: block; }
+  .miss-bar button { background: white; color: #ff9800; border: none; padding: 6px 12px; border-radius: 6px; margin-left: 8px; cursor: pointer; font-weight: 500; }
+  .status-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 1rem; }
+  .status-pill { background: #fafafa; padding: 6px 12px; border-radius: 20px; font-size: 12px; border: 1px solid #e0e0e0; }
+  .status-pill.ok { background: #e8f5e9; color: #2e7d32; border-color: #c8e6c9; }
+  .status-pill.warn { background: #fff3e0; color: #e65100; border-color: #ffcc80; }
+  .status-pill.err { background: #ffebee; color: #c62828; border-color: #ef9a9a; }
+  .label { color: #666; font-size: 13px; }
+  .big { font-size: 28px; font-weight: 500; margin: 8px 0 0; }
+  .small { font-size: 13px; color: #666; }
+  .clock { font-size: 32px; font-weight: 500; font-variant-numeric: tabular-nums; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 1rem; }
+  .stat { background: #f0f0f0; border-radius: 8px; padding: 1rem; }
+  .stat.now { background: #e3f2fd; }
+  .list { max-height: 400px; overflow-y: auto; padding-right: 4px; }
+  .dose { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 8px; margin-bottom: 4px; font-size: 14px; background: #fafafa; }
+  .dose.past { color: #999; text-decoration: line-through; background: transparent; }
+  .dose.next { background: #e3f2fd; color: #0d47a1; font-weight: 500; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .input-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  button { background: white; border: 1px solid #d0d0d0; border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; }
+  button:hover { background: #f0f0f0; border-color: #999; }
+  input[type="datetime-local"], input[type="number"] { border: 1px solid #d0d0d0; border-radius: 8px; padding: 8px 12px; font-size: 14px; font-family: inherit; }
+  .tag-night { background: #fff3e0; color: #e65100; font-size: 11px; padding: 3px 8px; border-radius: 6px; margin-left: 8px; }
+  .tag-day { background: #e8f5e9; color: #2e7d32; font-size: 11px; padding: 3px 8px; border-radius: 6px; margin-left: 8px; }
+  .section-title { font-size: 14px; font-weight: 500; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+  .help { background: #fafafa; }
+  .volume-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+  .volume-row input[type="range"] { flex: 1; max-width: 200px; }
+  .debug-log { background: #1a1a1a; color: #4ec9b0; padding: 8px 12px; border-radius: 8px; font-family: 'Consolas', monospace; font-size: 11px; max-height: 120px; overflow-y: auto; }
+  .debug-log .err { color: #f48771; }
+  .debug-log .warn { color: #dcdcaa; }
+  .debug-log .ok { color: #4ec9b0; }
+</style>
+</head>
+<body>
+
+<h1>Controle de aplicação de colírio (v4)</h1>
+
+<div class="alarm-bar" id="alarmBar">
+  <h2 id="alarmTitle">Hora do colírio</h2>
+  <div id="alarmInfo" style="margin-bottom: 12px;"></div>
+  <button id="btnApplied">Aplicado (parar)</button>
+  <button id="btnSnooze5">Soneca 5 min</button>
+</div>
+
+<div class="miss-bar" id="missBar">
+  <strong>⚠ Dose perdida:</strong> <span id="missText"></span>
+  <button id="btnMissOk">Marcar aplicada</button>
+  <button id="btnMissAlarm">Tocar alarme</button>
+</div>
+
+<div class="status-bar">
+  <span class="status-pill" id="statusAudio">Áudio: ?</span>
+  <span class="status-pill" id="statusNotif">Notificações: ?</span>
+  <span class="status-pill" id="statusVisible">Aba: ?</span>
+</div>
+
+<div class="grid">
+  <div class="stat now">
+    <div class="small">Agora</div>
+    <div class="clock" id="clockNow">--:--:--</div>
+    <div class="small" id="clockDate">--</div>
+  </div>
+  <div class="stat">
+    <div class="small">Próxima dose</div>
+    <div class="big" id="currentDose">--</div>
+    <div class="small" id="currentInfo">--</div>
+  </div>
+  <div class="stat">
+    <div class="small">Horário</div>
+    <div class="big" id="nextTime">--:--</div>
+    <div class="small" id="nextDate">--</div>
+  </div>
+  <div class="stat">
+    <div class="small">Faltam</div>
+    <div class="big" id="countdown">--:--:--</div>
+    <div class="small">para a próxima</div>
+  </div>
+  <div class="stat">
+    <div class="small">Progresso</div>
+    <div class="big" id="progress">--/--</div>
+    <div class="small" id="progressEnd">término: --</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="input-row">
+    <label class="label">Início:</label>
+    <input type="datetime-local" id="startTime" style="flex: 1; min-width: 200px;">
+  </div>
+  <div class="input-row">
+    <label class="label">Total:</label>
+    <input type="number" id="totalDoses" min="1" max="200" value="75" style="width: 80px;">
+    <label class="label">Intervalo (h):</label>
+    <input type="number" id="intervalH" min="1" max="24" value="5" style="width: 60px;">
+    <button id="btnStart">Carregar cronograma</button>
+  </div>
+  <div class="volume-row">
+    <label class="label">Volume:</label>
+    <input type="range" id="volumeSlider" min="0" max="100" value="80">
+    <span class="small" id="volumeLabel">80%</span>
+  </div>
+  <div class="controls">
+    <button id="btnNotif">Ativar notificações</button>
+    <button id="btnTest">Testar alarme</button>
+    <button id="btnUnlock">Desbloquear áudio</button>
+    <button id="btnExport">Exportar lista</button>
+    <button id="btnFilter">Mostrar só pendentes</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="section-title">
+    <span>Cronograma</span>
+    <span class="small" id="filterInfo">--</span>
+  </div>
+  <div class="list" id="doseList"></div>
+</div>
+
+<div class="card">
+  <div class="section-title"><span>Log de eventos</span></div>
+  <div class="debug-log" id="debugLog">[aguardando]</div>
+</div>
+
+<div class="card help">
+  <div class="small"><strong>v4 — correções aplicadas:</strong></div>
+  <div class="small">1. AudioContext desbloqueado no primeiro clique (bypassa autoplay policy)</div>
+  <div class="small">2. Resume forçado quando aba volta ao foco (visibilitychange)</div>
+  <div class="small">3. Status pills mostram estado de áudio, notificações e foco da aba</div>
+  <div class="small">4. Log de eventos mostra cada disparo de alarme (debug)</div>
+  <div class="small">5. Botão "Desbloquear áudio" libera permissão manualmente se necessário</div>
+</div>
+
+<script>
+(function(){
+  let cfg = { start: null, total: 75, intervalH: 5 };
+  let doses = [];
+  let timer = null;
+  let showOnlyPending = false;
+  let activeAlarm = null;
+  let audioCtx = null;
+  let audioUnlocked = false;
+  let volume = 0.8;
+  let lastCheck = Date.now();
+  let pendingMiss = null;
+
+  const $ = id => document.getElementById(id);
+  const $log = $('debugLog');
+  const $statusAudio = $('statusAudio');
+  const $statusNotif = $('statusNotif');
+  const $statusVisible = $('statusVisible');
+
+  function logEvent(msg, type){
+    const now = new Date();
+    const t = String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+':'+String(now.getSeconds()).padStart(2,'0');
+    const cls = type || 'ok';
+    const line = '<div class="'+cls+'">['+t+'] '+msg+'</div>';
+    if($log.innerHTML === '[aguardando]') $log.innerHTML = '';
+    $log.innerHTML = line + $log.innerHTML;
+    // limitar a 50 linhas
+    const lines = $log.querySelectorAll('div');
+    if(lines.length > 50){
+      for(let i = 50; i < lines.length; i++) lines[i].remove();
+    }
+  }
+
+  function updateStatus(){
+    // áudio
+    if(audioUnlocked && audioCtx && audioCtx.state === 'running'){
+      $statusAudio.textContent = 'Áudio: ativo';
+      $statusAudio.className = 'status-pill ok';
+    } else if(audioUnlocked){
+      $statusAudio.textContent = 'Áudio: suspenso';
+      $statusAudio.className = 'status-pill warn';
+    } else {
+      $statusAudio.textContent = 'Áudio: bloqueado';
+      $statusAudio.className = 'status-pill err';
+    }
+    // notificações
+    if(window.Notification){
+      const p = Notification.permission;
+      if(p === 'granted'){ $statusNotif.textContent = 'Notificações: ok'; $statusNotif.className = 'status-pill ok'; }
+      else if(p === 'denied'){ $statusNotif.textContent = 'Notificações: negadas'; $statusNotif.className = 'status-pill err'; }
+      else { $statusNotif.textContent = 'Notificações: pendente'; $statusNotif.className = 'status-pill warn'; }
+    } else {
+      $statusNotif.textContent = 'Notificações: indisponível';
+      $statusNotif.className = 'status-pill err';
+    }
+    // foco
+    if(document.visibilityState === 'visible'){
+      $statusVisible.textContent = 'Aba: em foco';
+      $statusVisible.className = 'status-pill ok';
+    } else {
+      $statusVisible.textContent = 'Aba: em segundo plano';
+      $statusVisible.className = 'status-pill warn';
+    }
+  }
+
+  function unlockAudio(){
+    try {
+      if(!audioCtx){
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        logEvent('AudioContext criado','ok');
+      }
+      if(audioCtx.state === 'suspended'){
+        audioCtx.resume().then(() => {
+          audioUnlocked = true;
+          logEvent('AudioContext resumido (state='+audioCtx.state+')','ok');
+          updateStatus();
+        }).catch(e => {
+          logEvent('Falha ao resumir AudioContext: '+e.message,'err');
+        });
+      } else {
+        audioUnlocked = true;
+        logEvent('AudioContext já ativo','ok');
+      }
+      // toca um som silencioso para validar
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      o.start(); o.stop(audioCtx.currentTime + 0.05);
+    } catch(e){
+      logEvent('Erro ao desbloquear áudio: '+e.message,'err');
+    }
+    updateStatus();
+  }
+
+  // listener global: qualquer clique tenta desbloquear áudio
+  document.addEventListener('click', () => {
+    if(!audioUnlocked) unlockAudio();
+  }, { once: false });
+
+  // listener de mudança de foco da aba
+  document.addEventListener('visibilitychange', () => {
+    updateStatus();
+    if(document.visibilityState === 'visible' && audioCtx && audioCtx.state === 'suspended'){
+      audioCtx.resume().then(() => {
+        logEvent('Áudio re-ativado após volta ao foco','ok');
+        updateStatus();
+      });
+    }
+  });
+
+  $start = $('startTime');
+  $start.value = '2026-04-29T07:00';
+
+  $('volumeSlider').addEventListener('input', () => {
+    volume = parseInt($('volumeSlider').value) / 100;
+    $('volumeLabel').textContent = $('volumeSlider').value + '%';
+  });
+
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function fmtDate(d){ return pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+d.getFullYear(); }
+  function fmtTime(d){ return pad(d.getHours())+':'+pad(d.getMinutes()); }
+  function fmtTimeSec(d){ return pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds()); }
+  function fmtFull(d){ return fmtDate(d)+' '+fmtTime(d); }
+  function weekdayName(d){
+    const names = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+    return names[d.getDay()];
+  }
+
+  function buildDoses(){
+    doses = [];
+    for(let i=0;i<cfg.total;i++){
+      const d = new Date(cfg.start.getTime() + i*cfg.intervalH*3600*1000);
+      const h = d.getHours();
+      const isNight = h >= 23 || h < 6;
+      doses.push({i:i+1, date:d, isNight, fired:false, applied:false});
+    }
+  }
+
+  function updateClock(){
+    const now = new Date();
+    $('clockNow').textContent = fmtTimeSec(now);
+    $('clockDate').textContent = weekdayName(now)+', '+fmtDate(now);
+  }
+
+  function checkMissedDose(now){
+    const gap = now.getTime() - lastCheck;
+    if(gap > 2 * 60 * 1000){
+      for(let d of doses){
+        if(!d.fired && !d.applied && !d.isNight && 
+           d.date.getTime() >= lastCheck && d.date.getTime() <= now.getTime()){
+          d.fired = true;
+          pendingMiss = d;
+          $('missBar').classList.add('active');
+          $('missText').textContent = 'Dose '+d.i+' às '+fmtFull(d.date)+' (há '+
+            Math.round((now.getTime() - d.date.getTime())/60000)+' min).';
+          logEvent('Dose perdida detectada: '+d.i,'warn');
+          break;
+        }
+      }
+    }
+    lastCheck = now.getTime();
+  }
+
+  function render(){
+    if(!doses.length) return;
+    const now = new Date();
+    updateClock();
+    updateStatus();
+    checkMissedDose(now);
+
+    let nextIdx = doses.findIndex(d => d.date.getTime() > now.getTime());
+    if(nextIdx === -1) nextIdx = doses.length;
+    const done = nextIdx;
+
+    if(nextIdx < doses.length){
+      const next = doses[nextIdx];
+      $('currentDose').textContent = next.i;
+      $('currentInfo').textContent = next.isNight ? 'noturna' : 'diurna';
+      $('nextTime').textContent = fmtTime(next.date);
+      $('nextDate').textContent = fmtDate(next.date);
+      const diff = next.date.getTime() - now.getTime();
+      const h = Math.floor(diff/3600000);
+      const m = Math.floor((diff%3600000)/60000);
+      const s = Math.floor((diff%60000)/1000);
+      $('countdown').textContent = pad(h)+':'+pad(m)+':'+pad(s);
+    } else {
+      $('currentDose').textContent = '✓';
+      $('currentInfo').textContent = 'concluído';
+      $('nextTime').textContent = '--:--';
+      $('nextDate').textContent = '--';
+      $('countdown').textContent = '--:--:--';
+    }
+    $('progress').textContent = done+'/'+cfg.total;
+    if(doses.length){
+      $('progressEnd').textContent = 'término: '+fmtFull(doses[doses.length-1].date);
+    }
+
+    $('doseList').innerHTML = '';
+    let visible = 0;
+    doses.forEach((d, idx) => {
+      const isPast = idx < done;
+      const isNext = idx === nextIdx;
+      if(showOnlyPending && isPast) return;
+      visible++;
+      const div = document.createElement('div');
+      let cls = 'dose';
+      if(isPast) cls += ' past';
+      else if(isNext) cls += ' next';
+      div.className = cls;
+      const tag = d.isNight ? '<span class="tag-night">noturna</span>' : '<span class="tag-day">diurna</span>';
+      div.innerHTML = '<span>Dose '+pad(d.i)+' — '+fmtFull(d.date)+'</span>'+tag;
+      $('doseList').appendChild(div);
+    });
+    $('filterInfo').textContent = showOnlyPending ? visible+' pendentes' : cfg.total+' doses';
+
+    doses.forEach((d) => {
+      if(!d.fired && !d.applied && !d.isNight && !activeAlarm){
+        const diff = d.date.getTime() - now.getTime();
+        if(diff <= 0 && diff > -30000){
+          d.fired = true;
+          logEvent('Disparando alarme dose '+d.i,'ok');
+          startAlarm(d);
+        }
+      }
+    });
+  }
+
+  function playBeepLoop(){
+    if(!activeAlarm || !activeAlarm.playing) return;
+    if(!audioCtx){ logEvent('Sem AudioContext - tentando criar','warn'); unlockAudio(); }
+    if(!audioCtx) return;
+    if(audioCtx.state === 'suspended'){
+      audioCtx.resume();
+    }
+    const playTone = (freq, when, dur) => {
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.connect(g); g.connect(audioCtx.destination);
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(volume * 0.4, audioCtx.currentTime + when);
+      o.start(audioCtx.currentTime + when);
+      g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + when + dur);
+      o.stop(audioCtx.currentTime + when + dur);
+    };
+    playTone(880, 0, 0.3);
+    playTone(660, 0.35, 0.3);
+    playTone(880, 0.7, 0.3);
+    playTone(660, 1.05, 0.3);
+    playTone(880, 1.4, 0.3);
+    activeAlarm.beepTimer = setTimeout(playBeepLoop, 2500);
+  }
+
+  function startAlarm(d){
+    if(activeAlarm) stopAlarm();
+    activeAlarm = { dose: d, playing: true, beepTimer: null, phaseTimer: null, snoozeTimer: null };
+    document.body.classList.add('alarming');
+    $('alarmBar').classList.add('active');
+    $('alarmTitle').textContent = 'Hora do colírio — Dose ' + d.i + (typeof d.i === 'number' ? '/'+cfg.total : '');
+    $('alarmInfo').textContent = d.date ? fmtFull(d.date) : '';
+    if(window.Notification && Notification.permission === 'granted'){
+      try {
+        const n = new Notification('Hora do colírio - Dose '+d.i, {
+          body: 'Pingue agora.',
+          requireInteraction: true,
+          tag: 'colirio-' + d.i
+        });
+        n.onclick = () => { window.focus(); };
+        logEvent('Notificação enviada','ok');
+      } catch(e){
+        logEvent('Erro notificação: '+e.message,'err');
+      }
+    } else {
+      logEvent('Notificação não enviada (permissão='+(window.Notification?Notification.permission:'N/A')+')','warn');
+    }
+    startSoundPhase();
+  }
+
+  function startSoundPhase(){
+    if(!activeAlarm) return;
+    activeAlarm.playing = true;
+    logEvent('Iniciando fase de som (2 min)','ok');
+    playBeepLoop();
+    activeAlarm.phaseTimer = setTimeout(() => {
+      pauseSound();
+      logEvent('Som pausou. Aguardando 5 min','ok');
+      activeAlarm.snoozeTimer = setTimeout(() => {
+        if(activeAlarm){
+          logEvent('Retomando som após 5 min','ok');
+          startSoundPhase();
+        }
+      }, 5 * 60 * 1000);
+    }, 2 * 60 * 1000);
+  }
+
+  function pauseSound(){
+    if(!activeAlarm) return;
+    activeAlarm.playing = false;
+    if(activeAlarm.beepTimer) { clearTimeout(activeAlarm.beepTimer); activeAlarm.beepTimer = null; }
+  }
+
+  function stopAlarm(){
+    if(!activeAlarm) return;
+    pauseSound();
+    if(activeAlarm.phaseTimer) clearTimeout(activeAlarm.phaseTimer);
+    if(activeAlarm.snoozeTimer) clearTimeout(activeAlarm.snoozeTimer);
+    if(activeAlarm.dose && typeof activeAlarm.dose.applied !== 'undefined'){
+      activeAlarm.dose.applied = true;
+    }
+    activeAlarm = null;
+    document.body.classList.remove('alarming');
+    $('alarmBar').classList.remove('active');
+    logEvent('Alarme desligado (Aplicado)','ok');
+  }
+
+  function snoozeAlarm(minutes){
+    if(!activeAlarm) return;
+    pauseSound();
+    if(activeAlarm.phaseTimer) clearTimeout(activeAlarm.phaseTimer);
+    if(activeAlarm.snoozeTimer) clearTimeout(activeAlarm.snoozeTimer);
+    document.body.classList.remove('alarming');
+    $('alarmBar').classList.remove('active');
+    logEvent('Soneca de '+minutes+' min','ok');
+    activeAlarm.snoozeTimer = setTimeout(() => {
+      if(activeAlarm){
+        document.body.classList.add('alarming');
+        $('alarmBar').classList.add('active');
+        startSoundPhase();
+      }
+    }, minutes * 60 * 1000);
+  }
+
+  $('btnApplied').addEventListener('click', () => stopAlarm());
+  $('btnSnooze5').addEventListener('click', () => snoozeAlarm(5));
+  $('btnMissOk').addEventListener('click', () => {
+    if(pendingMiss) pendingMiss.applied = true;
+    pendingMiss = null;
+    $('missBar').classList.remove('active');
+  });
+  $('btnMissAlarm').addEventListener('click', () => {
+    if(pendingMiss){
+      const d = pendingMiss;
+      pendingMiss = null;
+      $('missBar').classList.remove('active');
+      startAlarm(d);
+    }
+  });
+
+  $('btnStart').addEventListener('click', () => {
+    const v = $('startTime').value;
+    if(!v){ alert('Defina a data e hora de início'); return; }
+    cfg.start = new Date(v);
+    cfg.total = parseInt($('totalDoses').value) || 75;
+    cfg.intervalH = parseInt($('intervalH').value) || 5;
+    buildDoses();
+    if(timer) clearInterval(timer);
+    lastCheck = Date.now();
+    unlockAudio();
+    render();
+    timer = setInterval(render, 1000);
+    logEvent('Cronograma carregado: '+cfg.total+' doses, intervalo '+cfg.intervalH+'h','ok');
+  });
+
+  $('btnNotif').addEventListener('click', () => {
+    if(!window.Notification){ alert('Seu navegador não suporta notificações'); return; }
+    Notification.requestPermission().then(p => {
+      logEvent('Permissão notificações: '+p, p==='granted'?'ok':'warn');
+      updateStatus();
+      alert(p === 'granted' ? 'Notificações ativadas.' : 'Notificações não foram ativadas.');
+    });
+  });
+
+  $('btnTest').addEventListener('click', () => {
+    unlockAudio();
+    const fakeDose = { i: 'TESTE', date: new Date(), isNight: false, applied: false };
+    startAlarm(fakeDose);
+  });
+
+  $('btnUnlock').addEventListener('click', () => {
+    unlockAudio();
+    alert('Tentativa de desbloqueio enviada. Veja o log para detalhes.');
+  });
+
+  $('btnFilter').addEventListener('click', () => {
+    showOnlyPending = !showOnlyPending;
+    $('btnFilter').textContent = showOnlyPending ? 'Mostrar todas' : 'Mostrar só pendentes';
+    render();
+  });
+
+  $('btnExport').addEventListener('click', () => {
+    if(!doses.length){ alert('Carregue o cronograma primeiro'); return; }
+    let txt = 'Cronograma de aplicação de colírio\n';
+    txt += 'Início: '+fmtFull(cfg.start)+'\n';
+    txt += 'Intervalo: '+cfg.intervalH+'h | Total: '+cfg.total+' doses\n';
+    txt += 'Término: '+fmtFull(doses[doses.length-1].date)+'\n\n';
+    doses.forEach(d => {
+      txt += 'Dose '+pad(d.i)+' | '+fmtFull(d.date)+(d.isNight?' [noturna]':' [diurna]')+'\n';
+    });
+    const blob = new Blob([txt], {type:'text/plain'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'colirio_cronograma.txt';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  // inicialização
+  updateStatus();
+  $('btnStart').click();
+  logEvent('v4 inicializado','ok');
+})();
+</script>
+</body>
+</html>
